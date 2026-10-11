@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>おさかなさん</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+    background: #0077be;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  #game {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(180deg, #7ecfff 0%, #4aa8e0 40%, #1e6ea8 100%);
+    overflow: hidden;
+  }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  #permission {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(180deg, #7ecfff, #1e6ea8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    color: white;
+    text-align: center;
+    padding: 24px;
+  }
+  #permission h1 {
+    font-size: 44px;
+    margin-bottom: 24px;
+    text-shadow: 2px 2px 0 #005c8a;
+  }
+  #permission p {
+    font-size: 20px;
+    margin-bottom: 32px;
+    line-height: 1.6;
+  }
+  #startBtn {
+    font-size: 32px;
+    padding: 24px 56px;
+    background: #ffd93d;
+    color: #333;
+    border: none;
+    border-radius: 60px;
+    box-shadow: 0 8px 0 #b8990b, 0 12px 20px rgba(0,0,0,0.3);
+    cursor: pointer;
+    font-weight: bold;
+    transition: transform 0.1s;
+  }
+  #startBtn:active {
+    transform: translateY(4px);
+    box-shadow: 0 4px 0 #b8990b, 0 6px 10px rgba(0,0,0,0.3);
+  }
+  .fish-icon {
+    font-size: 90px;
+    margin-bottom: 16px;
+    animation: swim 2s ease-in-out infinite;
+  }
+  @keyframes swim {
+    0%, 100% { transform: translateX(-20px) rotate(-5deg); }
+    50% { transform: translateX(20px) rotate(5deg); }
+  }
+  #sharkBtn {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    width: 72px;
+    height: 72px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 4px 0 rgba(0,0,0,0.2), 0 6px 12px rgba(0,0,0,0.3);
+    font-size: 40px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 50;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: transform 0.1s;
+  }
+  #sharkBtn:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.2), 0 3px 6px rgba(0,0,0,0.3);
+  }
+  #sharkBtn.visible { display: flex; }
+  #sharkBtn.disabled { opacity: 0.4; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="permission">
+  <div class="fish-icon">🐟</div>
+  <h1>おさかなさん</h1>
+  <p>かたむけて およがせよう！<br>タップで ごはん🍚<br>2本ゆびで なかま✨<br>🦈ボタンで ぜんぶ たべちゃう</p>
+  <button id="startBtn">はじめる</button>
+</div>
+<div id="game">
+  <canvas id="canvas"></canvas>
+</div>
+<button id="sharkBtn" aria-label="サメで画面をクリア">🦈</button>
+
+<script>
+(function() {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const permissionScreen = document.getElementById('permission');
+  const startBtn = document.getElementById('startBtn');
+
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 泡
+  const bubbles = [];
+  for (let i = 0; i < 20; i++) {
+    bubbles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 4 + Math.random() * 12,
+      vy: 0.3 + Math.random() * 0.8,
+      alpha: 0.2 + Math.random() * 0.4
+    });
+  }
+
+  // 海藻
+  const seaweeds = [];
+  const seaweedCount = 6;
+  for (let i = 0; i < seaweedCount; i++) {
+    seaweeds.push({
+      x: (W / seaweedCount) * i + Math.random() * 40,
+      height: 80 + Math.random() * 80,
+      phase: Math.random() * Math.PI * 2
+    });
+  }
+
+  // 魚
+  const fish = {
+    x: W / 2,
+    y: H / 2,
+    vx: 0,
+    vy: 0,
+    angle: 0,
+    size: Math.min(W, H) * 0.14,
+    tailPhase: 0,
+    happy: 0,
+    fed: 0
+  };
+
+  // 餌
+  const foods = [];
+
+  // ハート
+  const hearts = [];
+
+  // 仲間の魚
+  const friends = [];
+  const FRIEND_COLORS = [
+    { light: '#ffb3d9', mid: '#ff69b4', dark: '#c2185b', fin: '#ad1457' },
+    { light: '#b3e5fc', mid: '#4fc3f7', dark: '#0277bd', fin: '#01579b' },
+    { light: '#c8e6c9', mid: '#66bb6a', dark: '#2e7d32', fin: '#1b5e20' },
+    { light: '#e1bee7', mid: '#ba68c8', dark: '#6a1b9a', fin: '#4a148c' },
+    { light: '#ffccbc', mid: '#ff8a65', dark: '#d84315', fin: '#bf360c' },
+    { light: '#fff9c4', mid: '#fff176', dark: '#f9a825', fin: '#f57f17' }
+  ];
+  const MAX_FRIENDS = 8;
+
+  // キラキラ（仲間登場エフェクト）
+  const sparkles = [];
+
+  // サメ演出
+  let shark = null; // { t, duration, chomped }
+  const SHARK_DURATION = 130; // フレーム数
+
+  // 傾き
+  let tiltX = 0, tiltY = 0;
+  let hasOrientation = false;
+
+  function handleOrientation(e) {
+    hasOrientation = true;
+    // gamma: 左右, beta: 前後
+    let g = e.gamma || 0;   // -90 ~ 90
+    let b = e.beta || 0;    // -180 ~ 180
+    // ポートレート想定
+    tiltX = Math.max(-45, Math.min(45, g)) / 45;
+    tiltY = Math.max(-45, Math.min(45, b - 40)) / 45; // 少し立てた状態を中立に
+  }
+
+  async function requestPermission() {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r === 'granted') {
+          window.addEventListener('deviceorientation', handleOrientation);
+        }
+      } else {
+        window.addEventListener('deviceorientation', handleOrientation);
+      }
+    } catch (err) {
+      window.addEventListener('deviceorientation', handleOrientation);
+    }
+  }
+
+  // 音（WebAudio）
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {}
+    }
+  }
+  function playPop(freq) {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 2, t + 0.1);
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
+  function playEat() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [440, 660, 880].forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(f, t + i * 0.08);
+      gain.gain.setValueAtTime(0.2, t + i * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + i * 0.08 + 0.15);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t + i * 0.08);
+      osc.stop(t + i * 0.08 + 0.2);
+    });
+  }
+
+  // 餌を落とす
+  function dropFood(x, y) {
+    initAudio();
+    playPop(600 + Math.random() * 200);
+    const colors = ['#ff6b6b', '#ffa500', '#ff69b4', '#98fb98', '#dda0dd', '#ffd700'];
+    for (let i = 0; i < 3; i++) {
+      foods.push({
+        x: x + (Math.random() - 0.5) * 40,
+        y: y + (Math.random() - 0.5) * 20,
+        vx: (Math.random() - 0.5) * 1,
+        vy: 0.5 + Math.random() * 0.5,
+        r: 10 + Math.random() * 8,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        wobble: Math.random() * Math.PI * 2,
+        life: 600
+      });
+    }
+  }
+
+  // 仲間の魚を呼ぶ音（キラキラ〜ん）
+  function playSummon() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [523, 659, 784, 1047].forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t + i * 0.06);
+      gain.gain.setValueAtTime(0.22, t + i * 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + i * 0.06 + 0.3);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t + i * 0.06);
+      osc.stop(t + i * 0.06 + 0.35);
+    });
+  }
+
+  // レア: 潜水服ピカチュウ用サウンド
+  function playPika() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    // 「ピカ〜」っぽい上がる音
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(600, t);
+    osc.frequency.linearRampToValueAtTime(1200, t + 0.15);
+    osc.frequency.linearRampToValueAtTime(900, t + 0.35);
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.55);
+  }
+
+  // サメの唸り音
+  function playSharkGrowl() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, t);
+    osc.frequency.linearRampToValueAtTime(50, t + 0.6);
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.75);
+  }
+  // ガブッ音
+  function playChomp() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    // ノイズバースト
+    const bufferSize = audioCtx.sampleRate * 0.15;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    const noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0.4;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 500;
+    src.connect(filter).connect(noiseGain).connect(audioCtx.destination);
+    src.start(t);
+    // 追加でドッ音
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.2);
+    gain.gain.setValueAtTime(0.5, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.3);
+  }
+
+  // サメを召喚（画面をクリア）
+  function summonShark() {
+    if (shark) return;
+    initAudio();
+    playSharkGrowl();
+    shark = { t: 0, duration: SHARK_DURATION, chomped: false };
+  }
+
+  // プーさんの登場音（のんびりハミング）
+  function playPoohHum() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [392, 494, 587, 494].forEach((f, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t + i * 0.15);
+      gain.gain.setValueAtTime(0.2, t + i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + i * 0.15 + 0.35);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t + i * 0.15);
+      osc.stop(t + i * 0.15 + 0.4);
+    });
+  }
+
+  // 仲間の魚を追加
+  function addFriend(x, y) {
+    if (friends.length >= MAX_FRIENDS) return;
+    // レア判定: 各1% (先勝ち)
+    const r = Math.random();
+    const isPikachu = r < 0.01;
+    const isPooh = !isPikachu && r < 0.02;
+    const isRare = isPikachu || isPooh;
+    const color = FRIEND_COLORS[friends.length % FRIEND_COLORS.length];
+    const baseSize = Math.min(W, H) * (isRare ? 0.13 : (0.08 + Math.random() * 0.05));
+    friends.push({
+      x: x,
+      y: y,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2,
+      angle: 0,
+      size: baseSize,
+      tailPhase: Math.random() * Math.PI * 2,
+      happy: isRare ? 300 : 60,
+      color: color,
+      wanderPhase: Math.random() * Math.PI * 2,
+      wanderTarget: { x: x, y: y },
+      wanderCooldown: 0,
+      isPikachu: isPikachu,
+      isPooh: isPooh,
+      bubblePhase: Math.random() * Math.PI * 2
+    });
+    // キラキラエフェクト
+    const sparkCount = isRare ? 24 : 12;
+    const emoji = isPikachu ? '⚡' : (isPooh ? '🍯' : '✨');
+    for (let i = 0; i < sparkCount; i++) {
+      const a = (Math.PI * 2 * i) / sparkCount;
+      sparkles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(a) * (2 + Math.random() * 2),
+        vy: Math.sin(a) * (2 + Math.random() * 2),
+        life: isRare ? 60 : 40,
+        maxLife: isRare ? 60 : 40,
+        size: 16 + Math.random() * 10,
+        emoji: emoji
+      });
+    }
+    initAudio();
+    if (isPikachu) playPika();
+    else if (isPooh) playPoohHum();
+    else playSummon();
+  }
+
+  // タッチ/クリック処理
+  // 1本指: 餌 / 2本指: 仲間を呼ぶ
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (e.touches.length >= 2) {
+      // 2本指の中間点に仲間を出す
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const x = (t0.clientX + t1.clientX) / 2;
+      const y = (t0.clientY + t1.clientY) / 2;
+      addFriend(x, y);
+    } else if (e.touches.length === 1) {
+      dropFood(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }
+  function onMouseDown(e) {
+    e.preventDefault();
+    // PCでは右クリック or Shift+クリックで仲間
+    if (e.button === 2 || e.shiftKey) {
+      addFriend(e.clientX, e.clientY);
+    } else {
+      dropFood(e.clientX, e.clientY);
+    }
+  }
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+  // 潜水服ピカチュウの描画
+  function drawPikachuDiver(f, now) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    // 上下ゆらぎ
+    const bob = Math.sin(now / 400 + f.bubblePhase) * 3;
+    ctx.translate(0, bob);
+
+    // 進行方向で左右反転
+    let flip = f.vx < 0 ? -1 : 1;
+    ctx.scale(flip, 1);
+
+    const s = f.size;
+
+    // 空気ホース（体の後ろから上へ）
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = s * 0.1;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.3, -s * 0.2);
+    ctx.quadraticCurveTo(-s * 0.9, -s * 0.6, -s * 1.0, -s * 1.2 + Math.sin(now / 300) * 5);
+    ctx.stroke();
+
+    // 尻尾（ジグザグ稲妻）
+    ctx.fillStyle = '#f9b900';
+    ctx.strokeStyle = '#6b3800';
+    ctx.lineWidth = s * 0.05;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.4, s * 0.1);
+    ctx.lineTo(-s * 0.75, s * 0.35);
+    ctx.lineTo(-s * 0.65, s * 0.45);
+    ctx.lineTo(-s * 0.95, s * 0.75);
+    ctx.lineTo(-s * 0.55, s * 0.55);
+    ctx.lineTo(-s * 0.6, s * 0.4);
+    ctx.lineTo(-s * 0.35, s * 0.25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 足のヒレ
+    ctx.fillStyle = '#f9b900';
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.15, s * 0.55, s * 0.25, s * 0.1, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6b3800';
+    ctx.lineWidth = s * 0.03;
+    ctx.stroke();
+
+    // 潜水服（体の紺色スーツ）
+    ctx.fillStyle = '#2c3e70';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.15, s * 0.55, s * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // スーツのハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.2, s * 0.0, s * 0.15, s * 0.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 黄色い体（顔と胴の一部が見える）
+    ctx.fillStyle = '#ffde3d';
+    ctx.beginPath();
+    ctx.arc(0, -s * 0.15, s * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // 顔の輪郭
+    ctx.strokeStyle = '#a67b00';
+    ctx.lineWidth = s * 0.03;
+    ctx.stroke();
+
+    // 耳（黒先端）
+    ctx.save();
+    // 左耳
+    ctx.fillStyle = '#ffde3d';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.35, -s * 0.4);
+    ctx.lineTo(-s * 0.55, -s * 0.95);
+    ctx.lineTo(-s * 0.2, -s * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#a67b00';
+    ctx.lineWidth = s * 0.025;
+    ctx.stroke();
+    // 左耳の黒先端
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.45, -s * 0.72);
+    ctx.lineTo(-s * 0.55, -s * 0.95);
+    ctx.lineTo(-s * 0.32, -s * 0.65);
+    ctx.closePath();
+    ctx.fill();
+    // 右耳
+    ctx.fillStyle = '#ffde3d';
+    ctx.beginPath();
+    ctx.moveTo(s * 0.35, -s * 0.4);
+    ctx.lineTo(s * 0.55, -s * 0.95);
+    ctx.lineTo(s * 0.2, -s * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#a67b00';
+    ctx.lineWidth = s * 0.025;
+    ctx.stroke();
+    // 右耳の黒先端
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.moveTo(s * 0.45, -s * 0.72);
+    ctx.lineTo(s * 0.55, -s * 0.95);
+    ctx.lineTo(s * 0.32, -s * 0.65);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // ほっぺ（赤）
+    ctx.fillStyle = '#ff2d55';
+    ctx.beginPath();
+    ctx.arc(-s * 0.3, -s * 0.05, s * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.3, -s * 0.05, s * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 目
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(-s * 0.15, -s * 0.22, s * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.15, -s * 0.22, s * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+    // 目のハイライト
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(-s * 0.12, -s * 0.25, s * 0.03, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.18, -s * 0.25, s * 0.03, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 口
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = s * 0.03;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.05, -s * 0.05);
+    ctx.quadraticCurveTo(0, s * 0.02, s * 0.05, -s * 0.05);
+    ctx.stroke();
+
+    // ヘルメット（透明ガラスドーム）
+    ctx.strokeStyle = 'rgba(200, 230, 255, 0.9)';
+    ctx.lineWidth = s * 0.06;
+    ctx.beginPath();
+    ctx.arc(0, -s * 0.18, s * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+    // ヘルメットのハイライト
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = s * 0.04;
+    ctx.beginPath();
+    ctx.arc(0, -s * 0.18, s * 0.72, -Math.PI * 0.9, -Math.PI * 0.5);
+    ctx.stroke();
+    // ヘルメットの金具リング
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = s * 0.08;
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.4, s * 0.55, s * 0.1, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // 空気の泡（ヘルメットから）
+    if (Math.random() < 0.1) {
+      bubbles.push({
+        x: f.x + (flip * s * 0.5) + (Math.random() - 0.5) * 10,
+        y: f.y - s * 0.6,
+        r: 3 + Math.random() * 5,
+        vy: 0.8 + Math.random() * 0.5,
+        alpha: 0.6,
+        temp: true
+      });
+    }
+  }
+
+  // プーさんの描画（浮き輪にのった熊）
+  function drawPoohBear(f, now) {
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    const bob = Math.sin(now / 350 + f.bubblePhase) * 4;
+    ctx.translate(0, bob);
+    const flip = f.vx < 0 ? -1 : 1;
+    ctx.scale(flip, 1);
+    const s = f.size;
+
+    // 浮き輪（赤白）
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.7, s * 0.9, s * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 浮き輪本体
+    ctx.fillStyle = '#e63946';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.5, s * 0.95, s * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 内側の穴
+    ctx.fillStyle = '#4aa8e0';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.5, s * 0.5, s * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 白いストライプ
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < 4; i++) {
+      const a = (Math.PI / 2) * i + Math.PI / 4;
+      const cx = Math.cos(a) * s * 0.72;
+      const cy = s * 0.5 + Math.sin(a) * s * 0.22;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s * 0.06, s * 0.16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 体（丸い黄色）
+    ctx.fillStyle = '#f2b134';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.05, s * 0.55, s * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // お腹の陰
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.15, s * 0.4, s * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 赤いシャツ（上半身）
+    ctx.fillStyle = '#e63946';
+    ctx.beginPath();
+    // 上部だけ
+    ctx.moveTo(-s * 0.55, s * 0.05);
+    ctx.quadraticCurveTo(-s * 0.55, -s * 0.25, -s * 0.35, -s * 0.28);
+    ctx.lineTo(s * 0.35, -s * 0.28);
+    ctx.quadraticCurveTo(s * 0.55, -s * 0.25, s * 0.55, s * 0.05);
+    ctx.lineTo(s * 0.55, s * 0.15);
+    ctx.lineTo(-s * 0.55, s * 0.15);
+    ctx.closePath();
+    ctx.fill();
+    // シャツの襟
+    ctx.fillStyle = '#c02334';
+    ctx.beginPath();
+    ctx.ellipse(0, -s * 0.28, s * 0.35, s * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 頭（黄色い丸）
+    ctx.fillStyle = '#f2b134';
+    ctx.beginPath();
+    ctx.arc(0, -s * 0.45, s * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 耳
+    ctx.fillStyle = '#f2b134';
+    ctx.beginPath();
+    ctx.arc(-s * 0.32, -s * 0.72, s * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.32, -s * 0.72, s * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    // 耳の内側
+    ctx.fillStyle = '#d69420';
+    ctx.beginPath();
+    ctx.arc(-s * 0.32, -s * 0.7, s * 0.07, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.32, -s * 0.7, s * 0.07, 0, Math.PI * 2);
+    ctx.fill();
+
+    // マズル（口周りの少し明るい部分）
+    ctx.fillStyle = '#f8ce6c';
+    ctx.beginPath();
+    ctx.ellipse(0, -s * 0.32, s * 0.2, s * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 鼻
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.ellipse(0, -s * 0.4, s * 0.06, s * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 口
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = s * 0.025;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -s * 0.32);
+    ctx.lineTo(0, -s * 0.27);
+    ctx.moveTo(0, -s * 0.27);
+    ctx.quadraticCurveTo(-s * 0.06, -s * 0.22, -s * 0.1, -s * 0.25);
+    ctx.moveTo(0, -s * 0.27);
+    ctx.quadraticCurveTo(s * 0.06, -s * 0.22, s * 0.1, -s * 0.25);
+    ctx.stroke();
+
+    // 目
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(-s * 0.13, -s * 0.5, s * 0.04, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.13, -s * 0.5, s * 0.04, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ハチミツ壺（右手に持つ）
+    ctx.save();
+    ctx.translate(s * 0.55, s * 0.1);
+    ctx.rotate(Math.sin(now / 500) * 0.1);
+    // 壺
+    ctx.fillStyle = '#8a5a2b';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.18, -s * 0.05);
+    ctx.lineTo(-s * 0.22, s * 0.18);
+    ctx.quadraticCurveTo(0, s * 0.28, s * 0.22, s * 0.18);
+    ctx.lineTo(s * 0.18, -s * 0.05);
+    ctx.closePath();
+    ctx.fill();
+    // 口の縁
+    ctx.fillStyle = '#6b4520';
+    ctx.beginPath();
+    ctx.ellipse(0, -s * 0.05, s * 0.2, s * 0.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // ラベル
+    ctx.fillStyle = '#f9e79f';
+    ctx.fillRect(-s * 0.16, s * 0.03, s * 0.32, s * 0.1);
+    ctx.fillStyle = '#8a5a2b';
+    ctx.font = `bold ${s * 0.08}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('HUNNY', 0, s * 0.08);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // 魚の描画
+  function drawFish(f, now) {
+    if (f.isPikachu) { drawPikachuDiver(f, now); return; }
+    if (f.isPooh) { drawPoohBear(f, now); return; }
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    // 向き（速度に応じて）
+    const speed = Math.hypot(f.vx, f.vy);
+    let targetAngle = Math.atan2(f.vy, f.vx);
+    // 逆向きは反転
+    let flip = 1;
+    if (Math.cos(targetAngle) < 0) {
+      targetAngle = Math.atan2(f.vy, -f.vx);
+      flip = -1;
+    }
+    // 角度をスムーズに追従
+    let da = targetAngle - f.angle;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    f.angle += da * 0.15;
+    ctx.rotate(f.angle);
+    ctx.scale(flip, 1);
+
+    const s = f.size;
+    const tail = Math.sin(f.tailPhase) * 0.3;
+    const c = f.color || { light: '#fff59d', mid: '#ffd93d', dark: '#ff9800', fin: '#ffb700' };
+
+    // 尻尾
+    ctx.fillStyle = c.fin;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.5, 0);
+    ctx.lineTo(-s * 1.0, -s * 0.4 + tail * s * 0.2);
+    ctx.lineTo(-s * 0.85, 0);
+    ctx.lineTo(-s * 1.0, s * 0.4 + tail * s * 0.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // 体
+    const bodyGrad = ctx.createRadialGradient(-s*0.2, -s*0.2, s*0.1, 0, 0, s*0.9);
+    bodyGrad.addColorStop(0, c.light);
+    bodyGrad.addColorStop(0.5, c.mid);
+    bodyGrad.addColorStop(1, c.dark);
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 0.7, s * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 背びれ
+    ctx.fillStyle = c.fin;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.2, -s * 0.4);
+    ctx.quadraticCurveTo(0, -s * 0.75, s * 0.2, -s * 0.35);
+    ctx.closePath();
+    ctx.fill();
+
+    // 腹びれ
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.1, s * 0.35);
+    ctx.quadraticCurveTo(-s * 0.05, s * 0.6, s * 0.15, s * 0.35);
+    ctx.closePath();
+    ctx.fill();
+
+    // ほっぺ
+    if (f.happy > 0) {
+      ctx.fillStyle = 'rgba(255, 105, 180, 0.6)';
+      ctx.beginPath();
+      ctx.arc(s * 0.15, s * 0.1, s * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 目 (白目)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(s * 0.35, -s * 0.1, s * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    // 黒目
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(s * 0.4, -s * 0.08, s * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(s * 0.44, -s * 0.13, s * 0.04, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 口
+    ctx.strokeStyle = '#c96';
+    ctx.lineWidth = s * 0.04;
+    ctx.beginPath();
+    if (f.happy > 0) {
+      // 笑顔
+      ctx.arc(s * 0.55, s * 0.05, s * 0.1, 0.2, Math.PI - 0.2);
+    } else {
+      ctx.moveTo(s * 0.55, s * 0.05);
+      ctx.quadraticCurveTo(s * 0.65, s * 0.05, s * 0.65, s * 0.0);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // 描画ループ
+  let lastT = performance.now();
+  function tick(now) {
+    const dt = Math.min(50, now - lastT) / 16.67;
+    lastT = now;
+
+    // 背景クリア（グラデはCSS）
+    ctx.clearRect(0, 0, W, H);
+
+    // 光の筋
+    ctx.save();
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.beginPath();
+      const x = (W / 3) * i + Math.sin(now / 3000 + i) * 30;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 60, 0);
+      ctx.lineTo(x + 200, H);
+      ctx.lineTo(x + 140, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 海藻
+    ctx.save();
+    seaweeds.forEach(sw => {
+      const sway = Math.sin(now / 800 + sw.phase) * 15;
+      ctx.strokeStyle = '#2e7d32';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(sw.x, H);
+      ctx.quadraticCurveTo(sw.x + sway * 0.5, H - sw.height * 0.5, sw.x + sway, H - sw.height);
+      ctx.stroke();
+      ctx.strokeStyle = '#43a047';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    });
+    // 砂
+    ctx.fillStyle = '#f4d38a';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 30) {
+      ctx.lineTo(x, H - 15 - Math.sin(x * 0.05) * 8);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // 泡
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.y -= b.vy * dt;
+      b.x += Math.sin(now / 500 + b.y * 0.01) * 0.3;
+      if (b.y < -20) {
+        if (b.temp) {
+          bubbles.splice(i, 1);
+          continue;
+        }
+        b.y = H + 20;
+        b.x = Math.random() * W;
+      }
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255,255,255,${b.alpha})`;
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(255,255,255,${b.alpha * 1.5})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 餌の更新と描画
+    for (let i = foods.length - 1; i >= 0; i--) {
+      const food = foods[i];
+      food.wobble += 0.1;
+      food.vy = Math.min(1.5, food.vy + 0.02);
+      food.x += food.vx * dt + Math.sin(food.wobble) * 0.3;
+      food.y += food.vy * dt;
+      food.life--;
+
+      // 底にぶつかったら止まる
+      if (food.y > H - 25) {
+        food.y = H - 25;
+        food.vy = 0;
+        food.vx *= 0.9;
+      }
+
+      // 描画
+      ctx.save();
+      ctx.translate(food.x, food.y);
+      ctx.rotate(food.wobble * 0.3);
+      ctx.fillStyle = food.color;
+      ctx.beginPath();
+      ctx.arc(0, 0, food.r, 0, Math.PI * 2);
+      ctx.fill();
+      // ハイライト
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(-food.r * 0.3, -food.r * 0.3, food.r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      if (food.life <= 0) foods.splice(i, 1);
+    }
+
+    // 魚の移動
+    // 傾きで加速
+    if (hasOrientation) {
+      fish.vx += tiltX * 0.4 * dt;
+      fish.vy += tiltY * 0.4 * dt;
+    }
+
+    // 餌に引き寄せられる
+    if (foods.length > 0) {
+      let nearest = null, nd = Infinity;
+      foods.forEach(f => {
+        const d = Math.hypot(f.x - fish.x, f.y - fish.y);
+        if (d < nd) { nd = d; nearest = f; }
+      });
+      if (nearest && nd < 400) {
+        const dx = nearest.x - fish.x;
+        const dy = nearest.y - fish.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const pull = 0.15 * dt;
+        fish.vx += (dx / d) * pull;
+        fish.vy += (dy / d) * pull;
+      }
+    }
+
+    // 抵抗
+    fish.vx *= 0.96;
+    fish.vy *= 0.96;
+
+    // 速度制限
+    const maxV = 8;
+    const v = Math.hypot(fish.vx, fish.vy);
+    if (v > maxV) {
+      fish.vx = fish.vx / v * maxV;
+      fish.vy = fish.vy / v * maxV;
+    }
+
+    fish.x += fish.vx * dt;
+    fish.y += fish.vy * dt;
+
+    // 壁でバウンド
+    const margin = fish.size * 0.6;
+    if (fish.x < margin) { fish.x = margin; fish.vx *= -0.5; }
+    if (fish.x > W - margin) { fish.x = W - margin; fish.vx *= -0.5; }
+    if (fish.y < margin) { fish.y = margin; fish.vy *= -0.5; }
+    if (fish.y > H - margin - 20) { fish.y = H - margin - 20; fish.vy *= -0.5; }
+
+    // 尻尾を振る
+    fish.tailPhase += (0.15 + v * 0.05) * dt;
+
+    // 餌を食べる
+    for (let i = foods.length - 1; i >= 0; i--) {
+      const food = foods[i];
+      const d = Math.hypot(food.x - fish.x, food.y - fish.y);
+      if (d < fish.size * 0.7 + food.r) {
+        foods.splice(i, 1);
+        fish.happy = 90;
+        fish.fed++;
+        playEat();
+        // ハート出現
+        for (let k = 0; k < 3; k++) {
+          hearts.push({
+            x: fish.x + (Math.random() - 0.5) * 40,
+            y: fish.y - 20,
+            vy: -1 - Math.random(),
+            vx: (Math.random() - 0.5) * 1.5,
+            life: 60,
+            size: 20 + Math.random() * 15
+          });
+        }
+        // 少し大きくなる（上限あり）
+        if (fish.size < Math.min(W, H) * 0.25) {
+          fish.size *= 1.03;
+        }
+      }
+    }
+
+    if (fish.happy > 0) fish.happy--;
+
+    // 仲間の魚の更新
+    for (let fi = 0; fi < friends.length; fi++) {
+      const fr = friends[fi];
+
+      // 目標地点の更新
+      fr.wanderCooldown -= dt;
+      if (fr.wanderCooldown <= 0) {
+        fr.wanderTarget.x = Math.random() * (W - 100) + 50;
+        fr.wanderTarget.y = Math.random() * (H - 150) + 50;
+        fr.wanderCooldown = 60 + Math.random() * 120;
+      }
+
+      // 餌があれば餌を優先
+      let targetX = fr.wanderTarget.x, targetY = fr.wanderTarget.y, isFood = false;
+      let nearestFood = null, nfd = Infinity;
+      foods.forEach(food => {
+        const d = Math.hypot(food.x - fr.x, food.y - fr.y);
+        if (d < nfd) { nfd = d; nearestFood = food; }
+      });
+      if (nearestFood && nfd < 300) {
+        targetX = nearestFood.x;
+        targetY = nearestFood.y;
+        isFood = true;
+      }
+
+      const dx = targetX - fr.x;
+      const dy = targetY - fr.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const acc = isFood ? 0.25 : 0.1;
+      fr.vx += (dx / dist) * acc * dt;
+      fr.vy += (dy / dist) * acc * dt;
+
+      // 他の魚と離れる（緩やかな分離）
+      const others = [fish, ...friends.filter(o => o !== fr)];
+      others.forEach(o => {
+        const odx = fr.x - o.x;
+        const ody = fr.y - o.y;
+        const od = Math.hypot(odx, ody);
+        const minDist = (fr.size + o.size) * 0.8;
+        if (od < minDist && od > 0.1) {
+          fr.vx += (odx / od) * 0.15 * dt;
+          fr.vy += (ody / od) * 0.15 * dt;
+        }
+      });
+
+      // 抵抗と速度制限
+      fr.vx *= 0.95;
+      fr.vy *= 0.95;
+      const fv = Math.hypot(fr.vx, fr.vy);
+      const fMax = 5;
+      if (fv > fMax) {
+        fr.vx = fr.vx / fv * fMax;
+        fr.vy = fr.vy / fv * fMax;
+      }
+
+      fr.x += fr.vx * dt;
+      fr.y += fr.vy * dt;
+
+      // 壁
+      const fm = fr.size * 0.6;
+      if (fr.x < fm) { fr.x = fm; fr.vx *= -0.5; }
+      if (fr.x > W - fm) { fr.x = W - fm; fr.vx *= -0.5; }
+      if (fr.y < fm) { fr.y = fm; fr.vy *= -0.5; }
+      if (fr.y > H - fm - 20) { fr.y = H - fm - 20; fr.vy *= -0.5; }
+
+      fr.tailPhase += (0.15 + fv * 0.05) * dt;
+
+      // 餌を食べる
+      for (let i = foods.length - 1; i >= 0; i--) {
+        const food = foods[i];
+        const d = Math.hypot(food.x - fr.x, food.y - fr.y);
+        if (d < fr.size * 0.7 + food.r) {
+          foods.splice(i, 1);
+          fr.happy = 90;
+          playEat();
+          for (let k = 0; k < 2; k++) {
+            hearts.push({
+              x: fr.x + (Math.random() - 0.5) * 30,
+              y: fr.y - 20,
+              vy: -1 - Math.random(),
+              vx: (Math.random() - 0.5) * 1.5,
+              life: 60,
+              size: 16 + Math.random() * 10
+            });
+          }
+        }
+      }
+
+      if (fr.happy > 0) fr.happy--;
+    }
+
+    // 魚を描画（仲間 → メイン魚の順で、メイン魚を手前に）
+    friends.forEach(fr => drawFish(fr, now));
+    drawFish(fish, now);
+
+    // サメの更新と描画
+    if (shark) {
+      shark.t += dt;
+      const t = shark.t;
+      const dur = shark.duration;
+      const half = dur * 0.5;
+
+      // フェーズ計算
+      // 0..half : 下から迫り上がる（口が開く）
+      // half..half+8 : ガブッと閉じる（真っ暗）
+      // half+8..dur : 沈む（フェードアウト）
+      let riseP = Math.min(1, t / half);
+      let mouthOpen; // 0 閉じ, 1 全開
+      let coverY;    // サメ上端の画面上のY
+      let chompFlash = 0;
+
+      if (t < half) {
+        // 迫る
+        const e = 1 - Math.pow(1 - riseP, 2); // ease-out
+        coverY = H * (1 - e * 1.1); // 画面より少し上まで
+        mouthOpen = e;
+      } else if (t < half + 10) {
+        // ガブッ
+        const cp = (t - half) / 10;
+        coverY = H * -0.1;
+        mouthOpen = 1 - cp;
+        chompFlash = 1 - cp;
+        if (!shark.chomped) {
+          shark.chomped = true;
+          // 全て消す（メイン魚だけ守る）
+          friends.length = 0;
+          foods.length = 0;
+          playChomp();
+          // 泡ドバッ
+          for (let i = 0; i < 40; i++) {
+            bubbles.push({
+              x: Math.random() * W,
+              y: H * 0.5 + Math.random() * H * 0.4,
+              r: 4 + Math.random() * 14,
+              vy: 0.5 + Math.random() * 1.5,
+              alpha: 0.5 + Math.random() * 0.4,
+              temp: true
+            });
+          }
+        }
+      } else {
+        // 沈む
+        const sp = (t - half - 10) / (dur - half - 10);
+        const e = sp * sp;
+        coverY = H * -0.1 + H * 1.2 * e;
+        mouthOpen = 0;
+      }
+
+      // サメ本体（画面下から迫る巨大な形）
+      const sharkTop = coverY;
+      const eyeSize = Math.min(W, H) * 0.06;
+
+      ctx.save();
+      // 影
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fillRect(0, sharkTop - 40, W, 40);
+
+      // 体（濃い青灰色）
+      const grad = ctx.createLinearGradient(0, sharkTop, 0, H);
+      grad.addColorStop(0, '#3a5a75');
+      grad.addColorStop(0.5, '#2c4560');
+      grad.addColorStop(1, '#1a2b3d');
+      ctx.fillStyle = grad;
+
+      // 上端はギザギザ（歯 or 口の開き）
+      ctx.beginPath();
+      ctx.moveTo(0, H + 20);
+      ctx.lineTo(0, sharkTop + mouthOpen * H * 0.15);
+      // 歯（上あご） - mouthOpenが大きいほど上に開く
+      const teethCount = 14;
+      const mouthDepth = mouthOpen * H * 0.5; // 口の深さ
+      for (let i = 0; i <= teethCount; i++) {
+        const px = (W / teethCount) * i;
+        const isTooth = i % 2 === 0;
+        const py = sharkTop + (isTooth ? -mouthOpen * 20 : mouthOpen * 20);
+        ctx.lineTo(px, py);
+      }
+      ctx.lineTo(W, sharkTop + mouthOpen * H * 0.15);
+      ctx.lineTo(W, H + 20);
+      ctx.closePath();
+      ctx.fill();
+
+      // 口の中（開いているとき見える黒い空間）
+      if (mouthOpen > 0.2) {
+        ctx.fillStyle = '#0d0d1a';
+        ctx.beginPath();
+        ctx.moveTo(0, sharkTop + mouthOpen * H * 0.15);
+        // 下向きに湾曲した口の奥
+        ctx.quadraticCurveTo(W / 2, sharkTop + mouthDepth + 40, W, sharkTop + mouthOpen * H * 0.15);
+        // 上あごの歯の裏へ
+        for (let i = teethCount; i >= 0; i--) {
+          const px = (W / teethCount) * i;
+          const isTooth = i % 2 === 0;
+          const py = sharkTop + (isTooth ? -mouthOpen * 20 : mouthOpen * 20);
+          ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // 上あごの白い歯
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < teethCount; i += 2) {
+          const px = (W / teethCount) * i;
+          const w = W / teethCount;
+          ctx.beginPath();
+          ctx.moveTo(px, sharkTop - mouthOpen * 20);
+          ctx.lineTo(px + w / 2, sharkTop + mouthOpen * 15);
+          ctx.lineTo(px + w, sharkTop - mouthOpen * 20);
+          ctx.closePath();
+          ctx.fill();
+        }
+        // 下あごの白い歯（口の内側の底に見える）
+        ctx.fillStyle = '#fff';
+        const lowerTeethY = sharkTop + mouthOpen * H * 0.13;
+        for (let i = 0; i < teethCount; i += 2) {
+          const px = (W / teethCount) * i + W / teethCount / 2;
+          const w = W / teethCount * 0.7;
+          ctx.beginPath();
+          ctx.moveTo(px - w/2, lowerTeethY);
+          ctx.lineTo(px, lowerTeethY + mouthOpen * 25);
+          ctx.lineTo(px + w/2, lowerTeethY);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // 目（迫り上がる中盤〜後半に見せる）
+      if (riseP > 0.3 && mouthOpen > 0.1 && chompFlash === 0) {
+        const eyeY = sharkTop + H * 0.35 + mouthOpen * H * 0.1;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(W * 0.25, eyeY, eyeSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(W * 0.75, eyeY, eyeSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(W * 0.25, eyeY + eyeSize * 0.1, eyeSize * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(W * 0.75, eyeY + eyeSize * 0.1, eyeSize * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // ガブッの瞬間の閃光
+      if (chompFlash > 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${chompFlash * 0.6})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      ctx.restore();
+
+      // ボタン一時無効化
+      sharkBtn.classList.add('disabled');
+
+      if (shark.t >= shark.duration) {
+        shark = null;
+        sharkBtn.classList.remove('disabled');
+      }
+    }
+
+    // キラキラ描画
+    for (let i = sparkles.length - 1; i >= 0; i--) {
+      const sp = sparkles[i];
+      sp.x += sp.vx;
+      sp.y += sp.vy;
+      sp.vx *= 0.94;
+      sp.vy *= 0.94;
+      sp.life--;
+      const alpha = sp.life / sp.maxLife;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = sp.size + 'px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(sp.emoji || '✨', sp.x, sp.y);
+      ctx.restore();
+      if (sp.life <= 0) sparkles.splice(i, 1);
+    }
+
+    // ハートを描画
+    for (let i = hearts.length - 1; i >= 0; i--) {
+      const h = hearts[i];
+      h.x += h.vx;
+      h.y += h.vy;
+      h.vy += 0.02;
+      h.life--;
+      const alpha = h.life / 60;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = h.size + 'px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('💛', h.x, h.y);
+      ctx.restore();
+      if (h.life <= 0) hearts.splice(i, 1);
+    }
+
+    // 傾き未検出のときは案内
+    if (!hasOrientation) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('タップ→ごはん🍚  2本ゆび→なかま✨', W / 2, 40);
+      ctx.restore();
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  const sharkBtn = document.getElementById('sharkBtn');
+  function onSharkBtn(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (shark) return;
+    summonShark();
+  }
+  sharkBtn.addEventListener('click', onSharkBtn);
+  sharkBtn.addEventListener('touchstart', onSharkBtn, { passive: false });
+
+  startBtn.addEventListener('click', async () => {
+    initAudio();
+    await requestPermission();
+    permissionScreen.style.display = 'none';
+    sharkBtn.classList.add('visible');
+    // フルスクリーン試行
+    try {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } catch (e) {}
+    // 画面ロック（対応端末のみ）
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('portrait').catch(() => {});
+      }
+    } catch (e) {}
+    lastT = performance.now();
+    requestAnimationFrame(tick);
+  });
+
+  // スクロール防止
+  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  document.addEventListener('gesturestart', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
